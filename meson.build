@@ -20,6 +20,8 @@ egl_gbm_micro_version = var_arr[2]
 
 eglexternalplatform = dependency('eglexternalplatform', version : ['>=1.1', '<2'])
 
+gbm = dependency('gbm', version : ['>=21.2'])
+
 pkgconf = configuration_data()
 pkgconf.set('prefix',      get_option('prefix'))
 pkgconf.set('exec_prefix', '${prefix}')

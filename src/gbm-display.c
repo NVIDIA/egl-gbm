@@ -21,10 +21,15 @@
  */
 
 #include "gbm-display.h"
-#include "gbm-platform.h"
-#include <stdlib.h>
+#include "gbm-utils.h"
 
-struct gbm_device;
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+#include <gbm.h>
 
 typedef struct GbmDisplayRec {
     GbmPlatformData* data;
@@ -33,38 +38,93 @@ typedef struct GbmDisplayRec {
     struct gbm_device* gbm;
 } GbmDisplay;
 
+static bool
+CheckDevicePath(const GbmPlatformData* data,
+                EGLDeviceEXT dev,
+                EGLenum pathEnum,
+                dev_t gbmDev)
+{
+    struct stat statbuf;
+    const char *devPath;
+
+    devPath = data->egl.QueryDeviceStringEXT(dev, pathEnum);
+
+    if (!devPath) return false;
+
+    memset(&statbuf, 0, sizeof(statbuf));
+    if (stat(devPath, &statbuf)) return false;
+
+    if (memcmp(&statbuf.st_rdev, &gbmDev, sizeof(gbmDev))) return false;
+
+    return true;
+}
+
 static EGLDeviceEXT
 FindGbmDevice(GbmPlatformData* data, struct gbm_device* gbm)
 {
-    EGLint maxDevices, numDevices;
-    EGLDeviceEXT* devices;
-    EGLDeviceEXT dev;
+    EGLDeviceEXT* devs = NULL;
+    const char* devExts;
+    struct stat statbuf;
+    EGLDeviceEXT dev = EGL_NO_DEVICE_EXT;
+    EGLint maxDevs, numDevs;
+    int gbmFd = gbm_device_get_fd(gbm);
+    int i;
 
-    if (data->egl.QueryDevicesEXT(0, NULL, &maxDevices) != EGL_TRUE) {
-        return EGL_NO_DEVICE_EXT;
-    }
-
-    if (maxDevices <= 0) {
+    if (gbmFd < 0) {
         /* XXX Set error */
-        return EGL_NO_DEVICE_EXT;
+        goto done;
     }
 
-    devices = malloc(maxDevices * sizeof(*devices));
-
-    if (!devices) {
+    memset(&statbuf, 0, sizeof(statbuf));
+    if (fstat(gbmFd, &statbuf)) {
         /* XXX Set error */
-        return EGL_NO_DEVICE_EXT;
+        goto done;
     }
 
-    if (data->egl.QueryDevicesEXT(maxDevices, devices, &numDevices) != EGL_TRUE) {
-        free(devices);
-        return EGL_NO_DEVICE_EXT;
+    if (data->egl.QueryDevicesEXT(0, NULL, &maxDevs) != EGL_TRUE) goto done;
+
+    if (maxDevs <= 0) {
+        /* XXX Set error */
+        goto done;
     }
 
-    /* XXX Look up device properly */
-    dev = devices[0];
+    devs = malloc(maxDevs * sizeof(*devs));
 
-    free(devices);
+    if (!devs) {
+        /* XXX Set error */
+        goto done;
+    }
+
+    if (data->egl.QueryDevicesEXT(maxDevs, devs, &numDevs) != EGL_TRUE)
+        goto done;
+
+    for (i = 0; i < numDevs; i++) {
+        devExts = data->egl.QueryDeviceStringEXT(devs[i], EGL_EXTENSIONS);
+
+        if (!eGbmFindExtension("EGL_EXT_device_drm", devExts)) continue;
+
+        if (CheckDevicePath(data,
+                            devs[i],
+                            EGL_DRM_DEVICE_FILE_EXT,
+                            statbuf.st_rdev)) {
+            dev = devs[i];
+            break;
+        }
+
+        if (!eGbmFindExtension("EGL_EXT_device_drm_render_node", devExts))
+            continue;
+
+        if (CheckDevicePath(data,
+                            devs[i],
+                            EGL_DRM_RENDER_NODE_FILE_EXT,
+                            statbuf.st_rdev)) {
+            dev = devs[i];
+            break;
+        }
+    }
+
+done:
+    free(devs);
 
     return dev;
 

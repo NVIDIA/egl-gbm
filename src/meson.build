@@ -22,6 +22,7 @@ egl_gbm = library('nvidia-egl-gbm',
     src,
     dependencies : [
         eglexternalplatform,
+        gbm,
         libdl,
     ],
     version : meson.project_version(),
