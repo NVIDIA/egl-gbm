@@ -21,6 +21,7 @@
  */
 
 #include "gbm-display.h"
+#include "gbm-handle.h"
 #include "gbm-utils.h"
 
 #include <sys/types.h>
@@ -32,6 +33,7 @@
 #include <gbm.h>
 
 typedef struct GbmDisplayRec {
+    GbmObject base;
     GbmPlatformData* data;
     EGLDeviceEXT dev;
     EGLDisplay devDpy;
@@ -130,6 +132,12 @@ done:
 
 }
 
+static void
+FreeDisplay(GbmObject* obj)
+{
+    free(obj);
+}
+
 EGLDisplay
 eGbmGetPlatformDisplayExport(void *data,
                              EGLenum platform,
@@ -160,6 +168,10 @@ eGbmGetPlatformDisplayExport(void *data,
         return EGL_NO_DISPLAY;
     }
 
+    display->base.dpy = display;
+    display->base.type = EGL_OBJECT_DISPLAY_KHR;
+    display->base.refCount = 1;
+    display->base.free = FreeDisplay;
     display->data = data;
     display->gbm = nativeDpy;
     display->dev = dev;
@@ -167,6 +179,12 @@ eGbmGetPlatformDisplayExport(void *data,
         display->data->egl.GetPlatformDisplay(EGL_PLATFORM_DEVICE_EXT,
                                               display->dev,
                                               NULL);
+
+    if (!eGbmAddObject(&display->base)) {
+        /* XXX Set error */
+        free(display);
+        return EGL_NO_DISPLAY;
+    }
 
     /* XXX Handle EGL_DEFAULT_DISPLAY? */
 
@@ -194,9 +212,18 @@ eGbmQueryStringExport(void *data,
                       EGLDisplay dpy,
                       EGLExtPlatformString name)
 {
-    /* XXX TODO */
+    (void)data;
+    (void)dpy;
 
-    return EGL_FALSE;
+    switch (name) {
+    case EGL_EXT_PLATFORM_PLATFORM_CLIENT_EXTENSIONS:
+        return "EGL_KHR_platform_gbm";
+
+    default:
+        break;
+    }
+
+    return NULL;
 }
 
 EGLBoolean
@@ -210,14 +237,22 @@ eGbmIsValidNativeDisplayExport(void *data, void *nativeDpy)
 void*
 eGbmGetInternalHandleExport(EGLDisplay dpy, EGLenum type, void *handle)
 {
+    GbmObject* obj = handle ? eGbmRefHandle(handle) : NULL;
+    void* res = handle;
+
+    if (!obj) return res;
+    if (obj->type != type || obj->dpy != dpy) goto done;
+
     switch (type) {
     case EGL_OBJECT_DISPLAY_KHR:
-        return ((GbmDisplay*)handle)->devDpy;
+        res = ((GbmDisplay*)obj)->devDpy;
+        break;
 
-    /* XXX TODO: Other types */
     default:
         break;
     }
 
-    return NULL;
+done:
+    eGbmUnrefObject(obj);
+    return res;
 }

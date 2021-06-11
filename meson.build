@@ -21,6 +21,7 @@ egl_gbm_micro_version = var_arr[2]
 eglexternalplatform = dependency('eglexternalplatform', version : ['>=1.1', '<2'])
 
 gbm = dependency('gbm', version : ['>=21.2'])
+threads = dependency('threads')
 
 pkgconf = configuration_data()
 pkgconf.set('prefix',      get_option('prefix'))

@@ -16,6 +16,8 @@ src = [
     'gbm-platform.c',
     'gbm-display.c',
     'gbm-utils.c',
+    'gbm-mutex.c',
+    'gbm-handle.c',
 ]
 
 egl_gbm = library('nvidia-egl-gbm',
@@ -23,6 +25,7 @@ egl_gbm = library('nvidia-egl-gbm',
     dependencies : [
         eglexternalplatform,
         gbm,
+        threads,
         libdl,
     ],
     version : meson.project_version(),
