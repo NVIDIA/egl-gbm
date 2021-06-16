@@ -125,14 +125,15 @@ CreatePbufferSurfaceHook(EGLDisplay dpy,
                          EGLConfig config,
                          const EGLint *attribs)
 {
-    (void)dpy;
-    (void)config;
-    (void)attribs;
+    GbmDisplay* display = (GbmDisplay*)eGbmRefHandle(dpy);
+    GbmPlatformData* data = display->data;
 
-    /* XXX Pass the request through */
+    if (!display) {
+        /*  No platform data. Can't set error EGL_NO_DISPLAY */
+        return EGL_NO_SURFACE;
+    }
 
-    /* XXX Set error */
-    return EGL_NO_SURFACE;
+    return data->egl.CreatePbufferSurface(display->devDpy, config, attribs);
 }
 
 typedef struct GbmEglHookRec {
