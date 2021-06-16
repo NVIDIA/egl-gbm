@@ -21,7 +21,6 @@
  */
 
 #include "gbm-display.h"
-#include "gbm-handle.h"
 #include "gbm-utils.h"
 
 #include <sys/types.h>
@@ -31,14 +30,6 @@
 #include <string.h>
 #include <stdbool.h>
 #include <gbm.h>
-
-typedef struct GbmDisplayRec {
-    GbmObject base;
-    GbmPlatformData* data;
-    EGLDeviceEXT dev;
-    EGLDisplay devDpy;
-    struct gbm_device* gbm;
-} GbmDisplay;
 
 static bool
 CheckDevicePath(const GbmPlatformData* data,
@@ -73,27 +64,28 @@ FindGbmDevice(GbmPlatformData* data, struct gbm_device* gbm)
     int i;
 
     if (gbmFd < 0) {
-        /* XXX Set error */
+        /*
+         * No need to set an error here or various other cases that boil down
+         * to an invalid native display. From the EGL 1.5 spec:
+         *
+         * "If platform is valid but no display matching <native_display> is
+         * available, then EGL_NO_DISPLAY is returned; no error condition is
+         * raised in this case."
+         */
         goto done;
     }
 
     memset(&statbuf, 0, sizeof(statbuf));
-    if (fstat(gbmFd, &statbuf)) {
-        /* XXX Set error */
-        goto done;
-    }
+    if (fstat(gbmFd, &statbuf)) goto done;
 
     if (data->egl.QueryDevicesEXT(0, NULL, &maxDevs) != EGL_TRUE) goto done;
 
-    if (maxDevs <= 0) {
-        /* XXX Set error */
-        goto done;
-    }
+    if (maxDevs <= 0) goto done;
 
     devs = malloc(maxDevs * sizeof(*devs));
 
     if (!devs) {
-        /* XXX Set error */
+        eGbmSetError(data, EGL_BAD_ALLOC);
         goto done;
     }
 
@@ -139,18 +131,19 @@ FreeDisplay(GbmObject* obj)
 }
 
 EGLDisplay
-eGbmGetPlatformDisplayExport(void *data,
+eGbmGetPlatformDisplayExport(void *dataVoid,
                              EGLenum platform,
                              void *nativeDpy,
                              const EGLAttrib *attribs)
 {
+    GbmPlatformData* data = dataVoid;
     GbmDisplay* display;
     EGLDeviceEXT dev;
 
     (void)attribs;
 
     if (platform != EGL_PLATFORM_GBM_KHR) {
-        /* XXX Set error */
+        eGbmSetError(data, EGL_BAD_PARAMETER);
         return EGL_NO_DISPLAY;
     }
 
@@ -164,7 +157,7 @@ eGbmGetPlatformDisplayExport(void *data,
     display = calloc(1, sizeof(*display));
 
     if (!display) {
-        /* XXX Set error */
+        eGbmSetError(data, EGL_BAD_ALLOC);
         return EGL_NO_DISPLAY;
     }
 
@@ -181,7 +174,7 @@ eGbmGetPlatformDisplayExport(void *data,
                                               NULL);
 
     if (!eGbmAddObject(&display->base)) {
-        /* XXX Set error */
+        eGbmSetError(data, EGL_BAD_ALLOC);
         free(display);
         return EGL_NO_DISPLAY;
     }
@@ -194,17 +187,35 @@ eGbmGetPlatformDisplayExport(void *data,
 EGLBoolean
 eGbmInitializeHook(EGLDisplay dpy, EGLint* major, EGLint* minor)
 {
-    GbmDisplay* display = (GbmDisplay*)dpy;
+    GbmDisplay* display = (GbmDisplay*)eGbmRefHandle(dpy);
+    EGLBoolean res;
 
-    return display->data->egl.Initialize(display->devDpy, major, minor);
+    if (!display) {
+        /*  No platform data. Can't set error EGL_NO_DISPLAY */
+        return EGL_FALSE;
+    }
+
+    res = display->data->egl.Initialize(display->devDpy, major, minor);
+
+    eGbmUnrefObject(&display->base);
+    return res;
 }
 
 EGLBoolean
 eGbmTerminateHook(EGLDisplay dpy)
 {
-    GbmDisplay* display = (GbmDisplay*)dpy;
+    GbmDisplay* display = (GbmDisplay*)eGbmRefHandle(dpy);
+    EGLBoolean res;
 
-    return display->data->egl.Terminate(display->devDpy);
+    if (!display) {
+        /*  No platform data. Can't set error EGL_NO_DISPLAY */
+        return EGL_FALSE;
+    }
+
+    res = display->data->egl.Terminate(display->devDpy);
+
+    eGbmUnrefObject(&display->base);
+    return res;
 }
 
 const char*
@@ -217,7 +228,7 @@ eGbmQueryStringExport(void *data,
 
     switch (name) {
     case EGL_EXT_PLATFORM_PLATFORM_CLIENT_EXTENSIONS:
-        return "EGL_KHR_platform_gbm";
+        return "EGL_KHR_platform_gbm EGL_MESA_platform_gbm";
 
     default:
         break;

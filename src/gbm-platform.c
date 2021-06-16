@@ -46,6 +46,8 @@ CreatePlatformData(const EGLExtDriver *driver)
 #include "gbm-egl-imports.h"
 #undef DO_EGL_FUNC
 
+    res->driver.setError = driver->setError;
+
     clExts = res->egl.QueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
 
     if (!eGbmFindExtension("EGL_EXT_platform_device", clExts) ||
@@ -64,12 +66,28 @@ CreatePlatformPixmapSurfaceHook(EGLDisplay dpy,
                                 void *nativePixmap,
                                 const EGLAttrib *attribs)
 {
-    (void)dpy;
+    GbmDisplay* display = (GbmDisplay*)eGbmRefHandle(dpy);
     (void)config;
     (void)nativePixmap;
     (void)attribs;
 
-    /* XXX Set error */
+    if (!display) return EGL_NO_SURFACE;
+
+    /*
+     * From the EGL 1.5 spec:
+     *
+     * "If config does not support rendering to pixmaps (the EGL_SURFACE_TYPE
+     * attribute does not contain EGL_PIXMAP_BIT), an EGL_BAD_MATCH error is
+     * generated."
+     *
+     * GBM does not have a native pixmap type. See EGL_KHR_platform_gbm, and
+     * none of the currently advertised EGLConfigs, which are passed through
+     * unmodified from the EGLDevice, would support rendering to pixmaps even
+     * if GBM did.
+     */
+    eGbmSetError(display->data, EGL_BAD_MATCH);
+    eGbmUnrefObject(&display->base);
+
     return EGL_NO_SURFACE;
 }
 
@@ -79,12 +97,26 @@ CreatePlatformWindowSurfaceHook(EGLDisplay dpy,
                                 void *nativeWindow,
                                 const EGLAttrib *attribs)
 {
-    (void)dpy;
+    GbmDisplay* display = (GbmDisplay*)eGbmRefHandle(dpy);
     (void)config;
     (void)nativeWindow;
     (void)attribs;
 
-    /* XXX Set error */
+    if (!display) return EGL_NO_SURFACE;
+
+    /*
+     * From the EGL 1.5 spec:
+     *
+     * "If config does not support rendering to windows (the EGL_SURFACE_TYPE
+     * attribute does not contain EGL_WINDOW_BIT), an EGL_BAD_MATCH error is
+     * generated."
+     *
+     * None of the currently advertised EGLConfigs, which are passed through
+     * unmodified from the EGLDevice, support rendering to windows.
+     */
+    eGbmSetError(display->data, EGL_BAD_MATCH);
+    eGbmUnrefObject(&display->base);
+
     return EGL_NO_SURFACE;
 }
 

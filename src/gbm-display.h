@@ -24,6 +24,15 @@
 #define GBM_DISPLAY_H
 
 #include "gbm-platform.h"
+#include "gbm-handle.h"
+
+typedef struct GbmDisplayRec {
+    GbmObject base;
+    GbmPlatformData* data;
+    EGLDeviceEXT dev;
+    EGLDisplay devDpy;
+    struct gbm_device* gbm;
+} GbmDisplay;
 
 EGLDisplay eGbmGetPlatformDisplayExport(void *data,
                                         EGLenum platform,

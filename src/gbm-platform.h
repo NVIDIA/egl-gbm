@@ -71,6 +71,10 @@ typedef struct GbmPlatformDataRec {
 #include "gbm-egl-imports.h"
 #undef DO_EGL_FUNC
     } egl;
+
+    struct {
+        PEGLEXTFNSETERROR setError;
+    } driver;
 } GbmPlatformData;
 
 EGBM_EXPORT EGLBoolean loadEGLExternalPlatform(int major, int minor,

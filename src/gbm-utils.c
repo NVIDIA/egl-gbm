@@ -22,6 +22,7 @@
 
 #include "gbm-utils.h"
 #include <string.h>
+#include <stdio.h>
 
 #if HAS_MINCORE
 #include <unistd.h>
@@ -51,6 +52,24 @@ eGbmFindExtension(const char* extension, const char* extensions)
     }
 
     return EGL_FALSE;
+}
+
+void
+eGbmSetErrorInternal(GbmPlatformData *data, EGLint error,
+                          const char *file, int line)
+{
+    static const char *defaultMsg = "GBM external platform error";
+    char msg[256];
+
+    if (!data || !data->driver.setError) return;
+
+    if (!file || (snprintf(msg, sizeof(msg), "%s:%d: %s",
+                           file, line, defaultMsg) <= 0)) {
+        data->driver.setError(error, EGL_DEBUG_MSG_ERROR_KHR, defaultMsg);
+        return;
+    }
+
+    data->driver.setError(error, EGL_DEBUG_MSG_ERROR_KHR, msg);
 }
 
 #if HAS_MINCORE
