@@ -57,6 +57,11 @@ CreatePlatformData(const EGLExtDriver *driver)
         return NULL;
     }
 
+    if (eGbmFindExtension("EGL_KHR_display_reference", clExts))
+        res->supportsDisplayReference = true;
+    else
+        res->supportsDisplayReference = false;
+
     return res;
 }
 

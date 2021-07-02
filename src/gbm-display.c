@@ -185,8 +185,13 @@ eGbmGetPlatformDisplayExport(void *dataVoid,
                              void *nativeDpy,
                              const EGLAttrib *attribs)
 {
+    static const EGLAttrib refAttrs[] = {
+        EGL_TRACK_REFERENCES_KHR, EGL_TRUE,
+        EGL_NONE
+    };
     GbmPlatformData* data = dataVoid;
     GbmDisplay* display = NULL;
+    const EGLAttrib *attrs = data->supportsDisplayReference ? refAttrs : NULL;
 
     (void)attribs;
 
@@ -225,7 +230,7 @@ eGbmGetPlatformDisplayExport(void *dataVoid,
     display->devDpy =
         display->data->egl.GetPlatformDisplay(EGL_PLATFORM_DEVICE_EXT,
                                               display->dev,
-                                              NULL);
+                                              attrs);
 
     if (display->devDpy == EGL_NO_DISPLAY) {
         /* GetPlatformDisplay will set an appropriate error */

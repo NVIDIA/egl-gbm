@@ -23,6 +23,8 @@
 #ifndef GBM_PLATFORM_H
 #define GBM_PLATFORM_H
 
+#include <stdbool.h>
+
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
@@ -75,6 +77,8 @@ typedef struct GbmPlatformDataRec {
     struct {
         PEGLEXTFNSETERROR setError;
     } driver;
+
+    bool supportsDisplayReference;
 } GbmPlatformData;
 
 EGBM_EXPORT EGLBoolean loadEGLExternalPlatform(int major, int minor,
