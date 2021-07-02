@@ -18,6 +18,8 @@ egl_gbm_major_version = var_arr[0]
 egl_gbm_minor_version = var_arr[1]
 egl_gbm_micro_version = var_arr[2]
 
+dep_libdrm = dependency('libdrm', version: '>= 2.4.75')
+
 eglexternalplatform = dependency('eglexternalplatform', version : ['>=1.1', '<2'])
 
 gbm = dependency('gbm', version : ['>=21.2'])

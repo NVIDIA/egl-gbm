@@ -32,6 +32,7 @@ typedef struct GbmDisplayRec {
     EGLDeviceEXT dev;
     EGLDisplay devDpy;
     struct gbm_device* gbm;
+    int fd;
 } GbmDisplay;
 
 EGLDisplay eGbmGetPlatformDisplayExport(void *data,

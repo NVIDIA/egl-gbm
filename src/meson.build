@@ -25,6 +25,7 @@ egl_gbm = library('nvidia-egl-gbm',
     dependencies : [
         eglexternalplatform,
         gbm,
+        dep_libdrm,
         threads,
         libdl,
     ],

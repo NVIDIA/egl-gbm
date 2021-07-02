@@ -25,11 +25,25 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
 #include <gbm.h>
+#include <xf86drm.h>
+
+#if !defined(O_CLOEXEC)
+#if ((defined(__sun__) && defined(__svr4__)) || defined(__SUNPRO_C) || defined(__SUNPRO_CC))
+/*
+ * Allow building against old SunOS headers with the assumption this flag will
+ * be available at runtime.
+ */
+#define O_CLOEXEC 0x00800000
+#else
+#error "No definition of O_CLOEXEC available"
+#endif
+#endif
 
 static bool
 CheckDevicePath(const GbmPlatformData* data,
@@ -124,10 +138,45 @@ done:
 
 }
 
+static int
+OpenDefaultDrmDevice(void)
+{
+    drmDevicePtr devices[1];
+    int numDevices = drmGetDevices2(0, devices, 1);
+    int fd = -1;
+
+    if (numDevices == 0)
+        return -1;
+
+    if (devices[0]->nodes[DRM_NODE_RENDER])
+        fd = open(devices[0]->nodes[DRM_NODE_RENDER], O_RDWR | O_CLOEXEC);
+
+    if ((fd < 0) && devices[0]->nodes[DRM_NODE_PRIMARY])
+        fd = open(devices[0]->nodes[DRM_NODE_PRIMARY], O_RDWR | O_CLOEXEC);
+
+    drmFreeDevices(devices, 1);
+
+    return fd;
+}
+
 static void
 FreeDisplay(GbmObject* obj)
 {
-    free(obj);
+    if (obj) {
+        GbmDisplay* display = (GbmDisplay*)obj;
+
+        /*
+         * The device file is only opened when the display is
+         * EGL_DEFAULT_DISPLAY, and is the first resource created by that code
+         * path.
+         */
+        if (display->fd >= 0) {
+            if (display->gbm) gbm_device_destroy(display->gbm);
+            close(display->fd);
+        }
+
+        free(obj);
+    }
 }
 
 EGLDisplay
@@ -137,20 +186,12 @@ eGbmGetPlatformDisplayExport(void *dataVoid,
                              const EGLAttrib *attribs)
 {
     GbmPlatformData* data = dataVoid;
-    GbmDisplay* display;
-    EGLDeviceEXT dev;
+    GbmDisplay* display = NULL;
 
     (void)attribs;
 
     if (platform != EGL_PLATFORM_GBM_KHR) {
         eGbmSetError(data, EGL_BAD_PARAMETER);
-        return EGL_NO_DISPLAY;
-    }
-
-    dev = FindGbmDevice(data, nativeDpy);
-
-    if (dev == EGL_NO_DEVICE_EXT) {
-        /* FindGbmDevice() sets an appropriate EGL error on failure */
         return EGL_NO_DISPLAY;
     }
 
@@ -166,22 +207,41 @@ eGbmGetPlatformDisplayExport(void *dataVoid,
     display->base.refCount = 1;
     display->base.free = FreeDisplay;
     display->data = data;
+    display->fd = -1;
     display->gbm = nativeDpy;
-    display->dev = dev;
+
+    if (nativeDpy == EGL_DEFAULT_DISPLAY) {
+        if ((display->fd = OpenDefaultDrmDevice()) < 0) goto fail;
+        if (!(display->gbm = gbm_create_device(display->fd))) goto fail;
+    }
+
+    display->dev = FindGbmDevice(data, display->gbm);
+
+    if (display->dev == EGL_NO_DEVICE_EXT) {
+        /* FindGbmDevice() sets an appropriate EGL error on failure */
+        goto fail;
+    }
+
     display->devDpy =
         display->data->egl.GetPlatformDisplay(EGL_PLATFORM_DEVICE_EXT,
                                               display->dev,
                                               NULL);
 
-    if (!eGbmAddObject(&display->base)) {
-        eGbmSetError(data, EGL_BAD_ALLOC);
-        free(display);
-        return EGL_NO_DISPLAY;
+    if (display->devDpy == EGL_NO_DISPLAY) {
+        /* GetPlatformDisplay will set an appropriate error */
+        goto fail;
     }
 
-    /* XXX Handle EGL_DEFAULT_DISPLAY? */
+    if (!eGbmAddObject(&display->base)) {
+        eGbmSetError(data, EGL_BAD_ALLOC);
+        goto fail;
+    }
 
     return (EGLDisplay)display;
+
+fail:
+    FreeDisplay(&display->base);
+    return EGL_NO_DISPLAY;
 }
 
 EGLBoolean
