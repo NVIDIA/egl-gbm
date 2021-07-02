@@ -240,9 +240,36 @@ eGbmQueryStringExport(void *data,
 EGLBoolean
 eGbmIsValidNativeDisplayExport(void *data, void *nativeDpy)
 {
-    /* XXX TODO */
+    /* Is <nativeDpy> a GBM device? */
+    char *envPlatform = getenv("EGL_PLATFORM");
 
+    (void)data;
+
+    /* Yes, because the environment said so. */
+    if (envPlatform && !strcasecmp(envPlatform, "gbm"))
+        return EGL_TRUE;
+
+#if HAS_MINCORE
+    /* GBM devices are pointers to instances of "struct gbm_device". */
+    if (!eGbmPointerIsDereferenceable(nativeDpy))
+        return EGL_FALSE;
+
+    /*
+     * The first member of struct gbm_device is "dummy", a pointer to the
+     * function gbm_create_device() that is there precisely for this purpose:
+     */
+    return (*(void**)nativeDpy == gbm_create_device) ? EGL_TRUE : EGL_FALSE;
+#else
+    (void)nativeDpy;
+
+    /*
+     * No way to know, so assume it's not a GBM device given GBM isn't the
+     * most widely-used EGL platform in most environments. Users/applications
+     * will need to use the environment variable or eglGetPlatformDisplay()
+     * on platforms that don't have mincore().
+     */
     return EGL_FALSE;
+#endif
 }
 
 void*
