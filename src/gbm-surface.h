@@ -20,24 +20,21 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#ifndef GBM_HANDLE_H
-#define GBM_HANDLE_H
+#ifndef GBM_SURFACE_H
+#define GBM_SURFACE_H
+
+#include "gbm-handle.h"
 
 #include <EGL/egl.h>
-#include <stdbool.h>
+#include <gbm.h>
 
-typedef struct GbmObjectRec {
-    void (*free)(struct GbmObjectRec *obj);
-    struct GbmDisplayRec* dpy;
-    EGLenum type;
-    int refCount;
-} GbmObject;
+int eGbmSurfaceHasFreeBuffers(struct gbm_surface* s);
+struct gbm_bo* eGbmSurfaceLockFrontBuffer(struct gbm_surface* s);
+void eGbmSurfaceReleaseBuffer(struct gbm_surface* s, struct gbm_bo *bo);
+EGLSurface eGbmCreatePlatformWindowSurfaceHook(EGLDisplay dpy,
+                                               EGLConfig config,
+                                               void* nativeWin,
+                                               const EGLAttrib* attribs);
+void* eGbmSurfaceUnwrap(GbmObject* obj);
 
-typedef const GbmObject* GbmHandle;
-
-GbmHandle eGbmAddObject(GbmObject* obj);
-GbmObject* eGbmRefHandle(GbmHandle handle);
-void eGbmUnrefObject(GbmObject* obj);
-bool eGbmUnrefHandle(GbmHandle handle);
-
-#endif /* GBM_HANDLE_H */
+#endif /* GBM_SURFACE_H */

@@ -22,6 +22,8 @@ dep_libdrm = dependency('libdrm', version: '>= 2.4.75')
 
 eglexternalplatform = dependency('eglexternalplatform', version : ['>=1.1', '<2'])
 
+ext_includes = include_directories('external')
+
 gbm = dependency('gbm', version : ['>=21.2'])
 threads = dependency('threads')
 

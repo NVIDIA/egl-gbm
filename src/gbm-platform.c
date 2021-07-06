@@ -23,6 +23,7 @@
 #include "gbm-utils.h"
 #include "gbm-display.h"
 #include "gbm-platform.h"
+#include "gbm-surface.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -97,35 +98,6 @@ CreatePlatformPixmapSurfaceHook(EGLDisplay dpy,
 }
 
 static EGLSurface
-CreatePlatformWindowSurfaceHook(EGLDisplay dpy,
-                                EGLConfig config,
-                                void *nativeWindow,
-                                const EGLAttrib *attribs)
-{
-    GbmDisplay* display = (GbmDisplay*)eGbmRefHandle(dpy);
-    (void)config;
-    (void)nativeWindow;
-    (void)attribs;
-
-    if (!display) return EGL_NO_SURFACE;
-
-    /*
-     * From the EGL 1.5 spec:
-     *
-     * "If config does not support rendering to windows (the EGL_SURFACE_TYPE
-     * attribute does not contain EGL_WINDOW_BIT), an EGL_BAD_MATCH error is
-     * generated."
-     *
-     * None of the currently advertised EGLConfigs, which are passed through
-     * unmodified from the EGLDevice, support rendering to windows.
-     */
-    eGbmSetError(display->data, EGL_BAD_MATCH);
-    eGbmUnrefObject(&display->base);
-
-    return EGL_NO_SURFACE;
-}
-
-static EGLSurface
 CreatePbufferSurfaceHook(EGLDisplay dpy,
                          EGLConfig config,
                          const EGLint *attribs)
@@ -150,7 +122,7 @@ static const GbmEglHook EglHooksMap[] = {
     /* Keep names in ascending order */
     { "eglCreatePbufferSurface", CreatePbufferSurfaceHook },
     { "eglCreatePlatformPixmapSurface", CreatePlatformPixmapSurfaceHook },
-    { "eglCreatePlatformWindowSurface", CreatePlatformWindowSurfaceHook },
+    { "eglCreatePlatformWindowSurface", eGbmCreatePlatformWindowSurfaceHook },
     { "eglInitialize", eGbmInitializeHook },
     { "eglTerminate", eGbmTerminateHook },
 };

@@ -22,6 +22,7 @@
 
 #include "gbm-display.h"
 #include "gbm-utils.h"
+#include "gbm-surface.h"
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -31,6 +32,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <gbm.h>
+#include <gbmint.h>
 #include <xf86drm.h>
 
 #if !defined(O_CLOEXEC)
@@ -253,6 +255,8 @@ EGLBoolean
 eGbmInitializeHook(EGLDisplay dpy, EGLint* major, EGLint* minor)
 {
     GbmDisplay* display = (GbmDisplay*)eGbmRefHandle(dpy);
+    GbmPlatformData* data;
+    const char* exts;
     EGLBoolean res;
 
     if (!display) {
@@ -260,8 +264,30 @@ eGbmInitializeHook(EGLDisplay dpy, EGLint* major, EGLint* minor)
         return EGL_FALSE;
     }
 
-    res = display->data->egl.Initialize(display->devDpy, major, minor);
+    data = display->data;
 
+    res = data->egl.Initialize(display->devDpy, major, minor);
+
+    if (!res) goto done;
+
+    exts = data->egl.QueryString(display->devDpy, EGL_EXTENSIONS);
+
+    if (!exts ||
+        !eGbmFindExtension("EGL_KHR_stream", exts) ||
+        !eGbmFindExtension("EGL_KHR_stream_producer_eglsurface", exts) ||
+        !eGbmFindExtension("EGL_KHR_image_base", exts) ||
+        !eGbmFindExtension("EGL_NV_stream_consumer_eglimage", exts) ||
+        !eGbmFindExtension("EGL_MESA_image_dma_buf_export", exts)) {
+        data->egl.Terminate(display->devDpy);
+        eGbmSetError(data, EGL_NOT_INITIALIZED);
+        res = EGL_FALSE;
+    }
+
+    display->gbm->v0.surface_lock_front_buffer = eGbmSurfaceLockFrontBuffer;
+    display->gbm->v0.surface_release_buffer = eGbmSurfaceReleaseBuffer;
+    display->gbm->v0.surface_has_free_buffers = eGbmSurfaceHasFreeBuffers;
+
+done:
     eGbmUnrefObject(&display->base);
     return res;
 }
@@ -349,6 +375,9 @@ eGbmGetInternalHandleExport(EGLDisplay dpy, EGLenum type, void *handle)
     switch (type) {
     case EGL_OBJECT_DISPLAY_KHR:
         res = ((GbmDisplay*)obj)->devDpy;
+        break;
+    case EGL_OBJECT_SURFACE_KHR:
+        res = eGbmSurfaceUnwrap(obj);
         break;
 
     default:
