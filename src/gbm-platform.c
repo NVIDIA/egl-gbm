@@ -120,10 +120,12 @@ typedef struct GbmEglHookRec {
 
 static const GbmEglHook EglHooksMap[] = {
     /* Keep names in ascending order */
+    { "eglChooseConfig", eGbmChooseConfigHook },
     { "eglCreatePbufferSurface", CreatePbufferSurfaceHook },
     { "eglCreatePlatformPixmapSurface", CreatePlatformPixmapSurfaceHook },
     { "eglCreatePlatformWindowSurface", eGbmCreatePlatformWindowSurfaceHook },
     { "eglDestroySurface", eGbmDestroySurfaceHook },
+    { "eglGetConfigAttrib", eGbmGetConfigAttribHook },
     { "eglInitialize", eGbmInitializeHook },
     { "eglTerminate", eGbmTerminateHook },
 };

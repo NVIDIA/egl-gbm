@@ -50,5 +50,15 @@ EGLBoolean eGbmQueryDisplayAttribHook(EGLDisplay dpy,
                                       EGLint name,
                                       EGLAttrib *value);
 EGLBoolean eGbmTerminateHook(EGLDisplay dpy);
+EGLBoolean eGbmChooseConfigHook(EGLDisplay dpy,
+                                EGLint const* attribs,
+                                EGLConfig* configs,
+                                EGLint configSize,
+                                EGLint *numConfig);
+
+EGLBoolean eGbmGetConfigAttribHook(EGLDisplay dpy,
+                                   EGLConfig config,
+                                   EGLint attribute,
+                                   EGLint* value);
 
 #endif /* GBM_DISPLAY_H */

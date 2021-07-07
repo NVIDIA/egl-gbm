@@ -388,3 +388,113 @@ done:
     eGbmUnrefObject(obj);
     return res;
 }
+
+EGLBoolean
+eGbmChooseConfigHook(EGLDisplay dpy,
+                     EGLint const* attribs,
+                     EGLConfig* configs,
+                     EGLint configSize,
+                     EGLint *numConfig)
+{
+    GbmDisplay* display = (GbmDisplay*)eGbmRefHandle(dpy);
+    GbmPlatformData* data;
+    EGLint *newAttribs = NULL;
+    EGLint nAttribs = 0;
+    EGLint nNewAttribs = 0;
+    bool surfType = false;
+    EGLint err = EGL_SUCCESS;
+    EGLBoolean ret;
+
+    if (!display) {
+        /*  No platform data. Can't set error EGL_NO_DISPLAY */
+        return EGL_FALSE;
+    }
+
+    data = display->data;
+
+    if (attribs) {
+        for (; attribs[nAttribs] != EGL_NONE; nAttribs += 2)
+            surfType = surfType || (attribs[nAttribs] == EGL_SURFACE_TYPE);
+    }
+
+    nNewAttribs = (surfType ? nAttribs : nAttribs + 2);
+    newAttribs = malloc((nNewAttribs + 1) * sizeof(*newAttribs));
+
+    if (!newAttribs) {
+        err = EGL_BAD_ALLOC;
+        goto fail;
+    }
+    memcpy(newAttribs, attribs, (nAttribs + 1) * sizeof(*newAttribs));
+
+    if (surfType) {
+        /*
+         * Convert all instances of EGL_WINDOW_BIT in an EGL_SURFACE_TYPE
+         * attribute's value to EGL_STREAM_BIT_KHR
+         */
+        for (nAttribs = 0; newAttribs[nAttribs] != EGL_NONE; nAttribs += 2) {
+            if ((newAttribs[nAttribs] == EGL_SURFACE_TYPE) &&
+                (newAttribs[nAttribs + 1] != EGL_DONT_CARE) &&
+                (newAttribs[nAttribs + 1] & EGL_WINDOW_BIT)) {
+                newAttribs[nAttribs + 1] &= ~EGL_WINDOW_BIT;
+                newAttribs[nAttribs + 1] |= EGL_STREAM_BIT_KHR;
+            }
+        }
+    } else {
+        /*
+         * If EGL_SURFACE_TYPE was not specified, convert the default
+         * EGL_WINDOW_BIT to EGL_STREAM_BIT_KHR
+         */
+        newAttribs[nAttribs] = EGL_SURFACE_TYPE;
+        newAttribs[nAttribs+1] = EGL_STREAM_BIT_KHR;
+        newAttribs[nAttribs+2] = EGL_NONE;
+    }
+
+    ret = data->egl.ChooseConfig(display->devDpy,
+                                 newAttribs,
+                                 configs,
+                                 configSize,
+                                 numConfig);
+
+    free(newAttribs);
+    return ret;
+
+fail:
+    free(newAttribs);
+    eGbmSetError(data, err);
+
+    eGbmUnrefObject(&display->base);
+
+    return EGL_FALSE;
+}
+
+EGLBoolean
+eGbmGetConfigAttribHook(EGLDisplay dpy,
+                        EGLConfig config,
+                        EGLint attribute,
+                        EGLint* value)
+{
+    GbmDisplay* display = (GbmDisplay*)eGbmRefHandle(dpy);
+    EGLBoolean ret;
+
+    if (!display) {
+        /*  No platform data. Can't set error EGL_NO_DISPLAY */
+        return EGL_FALSE;
+    }
+
+    ret = display->data->egl.GetConfigAttrib(display->devDpy,
+                                             config,
+                                             attribute,
+                                             value);
+
+    if (ret && (attribute == EGL_SURFACE_TYPE)) {
+        if (*value & EGL_STREAM_BIT_KHR) {
+            *value |= EGL_WINDOW_BIT;
+        } else {
+            *value &= ~EGL_WINDOW_BIT;
+        }
+    }
+
+    eGbmUnrefObject(&display->base);
+
+    return ret;
+}
