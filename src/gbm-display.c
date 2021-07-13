@@ -31,9 +31,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <assert.h>
 #include <gbm.h>
 #include <gbmint.h>
 #include <xf86drm.h>
+#include <drm_fourcc.h>
 
 #if !defined(O_CLOEXEC)
 #if ((defined(__sun__) && defined(__svr4__)) || defined(__SUNPRO_C) || defined(__SUNPRO_CC))
@@ -389,6 +391,61 @@ done:
     return res;
 }
 
+static uint32_t ConfigToDrmFourCC(GbmDisplay* display, EGLConfig config)
+{
+    EGLDisplay dpy = display->devDpy;
+    EGLint r, g, b, a;
+    EGLBoolean ret = EGL_TRUE;
+
+    ret &= display->data->egl.GetConfigAttrib(dpy,
+                                              config,
+                                              EGL_RED_SIZE,
+                                              &r);
+    ret &= display->data->egl.GetConfigAttrib(dpy,
+                                              config,
+                                              EGL_GREEN_SIZE,
+                                              &g);
+    ret &= display->data->egl.GetConfigAttrib(dpy,
+                                              config,
+                                              EGL_BLUE_SIZE,
+                                              &b);
+    ret &= display->data->egl.GetConfigAttrib(dpy,
+                                              config,
+                                              EGL_ALPHA_SIZE,
+                                              &a);
+
+    if (!ret) {
+        /*
+         * The only reason this could fail is some internal error in the
+         * platform library code or if the application terminated the display
+         * in another thread while this code was running. In either case,
+         * behave as if there is no DRM fourcc format associated with this
+         * config.
+         */
+        return 0; /* DRM_FORMAT_INVALID */
+    }
+
+    /* Handles configs with up to 255 bits per component */
+    assert(a < 256 && g < 256 && b < 256 && a < 256);
+#define PACK_CONFIG(r_, g_, b_, a_) \
+    (((r_) << 24ULL) | ((g_) << 16ULL) | ((b_) << 8ULL) | (a_))
+
+    switch (PACK_CONFIG(r, g, b, a)) {
+    case PACK_CONFIG(8, 8, 8, 0):
+        return DRM_FORMAT_XRGB8888;
+    case PACK_CONFIG(8, 8, 8, 8):
+        return DRM_FORMAT_ARGB8888;
+    case PACK_CONFIG(5, 6, 5, 0):
+        return DRM_FORMAT_RGB565;
+    case PACK_CONFIG(10, 10, 10, 0):
+        return DRM_FORMAT_XRGB2101010;
+    case PACK_CONFIG(10, 10, 10, 2):
+        return DRM_FORMAT_ARGB2101010;
+    default:
+        return 0; /* DRM_FORMAT_INVALID */
+    }
+}
+
 EGLBoolean
 eGbmChooseConfigHook(EGLDisplay dpy,
                      EGLint const* attribs,
@@ -399,11 +456,16 @@ eGbmChooseConfigHook(EGLDisplay dpy,
     GbmDisplay* display = (GbmDisplay*)eGbmRefHandle(dpy);
     GbmPlatformData* data;
     EGLint *newAttribs = NULL;
+    EGLConfig *newConfigs = NULL;
     EGLint nAttribs = 0;
     EGLint nNewAttribs = 0;
-    bool surfType = false;
+    EGLint nNewConfigs = 0;
+    EGLint cfg;
+    EGLint nativeVisual = EGL_DONT_CARE;
     EGLint err = EGL_SUCCESS;
-    EGLBoolean ret;
+    EGLBoolean ret = EGL_FALSE;
+    bool surfType = false;
+    bool nativeVisualID = false;
 
     if (!display) {
         /*  No platform data. Can't set error EGL_NO_DISPLAY */
@@ -413,58 +475,122 @@ eGbmChooseConfigHook(EGLDisplay dpy,
     data = display->data;
 
     if (attribs) {
-        for (; attribs[nAttribs] != EGL_NONE; nAttribs += 2)
+        for (; attribs[nAttribs] != EGL_NONE; nAttribs += 2) {
             surfType = surfType || (attribs[nAttribs] == EGL_SURFACE_TYPE);
+            if (attribs[nAttribs] == EGL_NATIVE_VISUAL_ID) {
+                nativeVisual = attribs[nAttribs + 1];
+                nativeVisualID = true;
+            }
+        }
     }
 
+    /*
+     * Add room for EGL_SURFACE_TYPE attrib if not present, remove the
+     * EGL_NATIVE_VISUAL_ID attrib if present
+     */
     nNewAttribs = (surfType ? nAttribs : nAttribs + 2);
+    nNewAttribs = (nativeVisualID ? nAttribs - 2 : nAttribs);
+
     newAttribs = malloc((nNewAttribs + 1) * sizeof(*newAttribs));
 
     if (!newAttribs) {
         err = EGL_BAD_ALLOC;
-        goto fail;
+        goto done;
     }
-    memcpy(newAttribs, attribs, (nAttribs + 1) * sizeof(*newAttribs));
 
-    if (surfType) {
+    for (nAttribs = 0, nNewAttribs = 0;
+         attribs[nAttribs] != EGL_NONE;
+         nAttribs += 2) {
         /*
          * Convert all instances of EGL_WINDOW_BIT in an EGL_SURFACE_TYPE
          * attribute's value to EGL_STREAM_BIT_KHR
          */
-        for (nAttribs = 0; newAttribs[nAttribs] != EGL_NONE; nAttribs += 2) {
-            if ((newAttribs[nAttribs] == EGL_SURFACE_TYPE) &&
-                (newAttribs[nAttribs + 1] != EGL_DONT_CARE) &&
-                (newAttribs[nAttribs + 1] & EGL_WINDOW_BIT)) {
-                newAttribs[nAttribs + 1] &= ~EGL_WINDOW_BIT;
-                newAttribs[nAttribs + 1] |= EGL_STREAM_BIT_KHR;
-            }
+        if ((attribs[nAttribs] == EGL_SURFACE_TYPE) &&
+            (attribs[nAttribs + 1] != EGL_DONT_CARE) &&
+            (attribs[nAttribs + 1] & EGL_WINDOW_BIT)) {
+            newAttribs[nNewAttribs++] = attribs[nAttribs];
+            newAttribs[nNewAttribs++] =
+                (attribs[nAttribs + 1] & ~EGL_WINDOW_BIT) |
+                EGL_STREAM_BIT_KHR;
+
+        /* Remove all instances of the EGL_nATIVE_VISUAL_ID attribute */
+        } else if (attribs[nAttribs] != EGL_NATIVE_VISUAL_ID) {
+            newAttribs[nNewAttribs++] = attribs[nAttribs];
+            newAttribs[nNewAttribs++] = attribs[nAttribs + 1];
         }
-    } else {
+    }
+
+    if (!surfType) {
         /*
          * If EGL_SURFACE_TYPE was not specified, convert the default
          * EGL_WINDOW_BIT to EGL_STREAM_BIT_KHR
          */
-        newAttribs[nAttribs] = EGL_SURFACE_TYPE;
-        newAttribs[nAttribs+1] = EGL_STREAM_BIT_KHR;
-        newAttribs[nAttribs+2] = EGL_NONE;
+        newAttribs[nNewAttribs++] = EGL_SURFACE_TYPE;
+        newAttribs[nNewAttribs++] = EGL_STREAM_BIT_KHR;
     }
 
-    ret = data->egl.ChooseConfig(display->devDpy,
-                                 newAttribs,
-                                 configs,
-                                 configSize,
-                                 numConfig);
+    newAttribs[nNewAttribs] = EGL_NONE;
 
-    free(newAttribs);
-    return ret;
+    if (nativeVisual != EGL_DONT_CARE) {
+        /*
+         * Need to query *all* configs that match everything but the specified
+         * native visual ID, then filter them down based on visual ID before
+         * clamping to the number of configs requested.
+         */
+        ret = data->egl.ChooseConfig(display->devDpy,
+                                     newAttribs,
+                                     NULL,
+                                     0,
+                                     &nNewConfigs);
 
-fail:
+        if (!ret || !*numConfig) goto done;
+
+        newConfigs = malloc(sizeof(EGLConfig) * *numConfig);
+
+        if (!newConfigs) {
+            err = EGL_BAD_ALLOC;
+            goto done;
+        }
+
+        ret = data->egl.ChooseConfig(display->devDpy,
+                                     newAttribs,
+                                     newConfigs,
+                                     nNewConfigs,
+                                     &nNewConfigs);
+
+        if (!ret) goto done;
+
+        for (cfg = 0, *numConfig = 0;
+             cfg < nNewConfigs && (!configs || *numConfig < configSize);
+             cfg++) {
+            if (ConfigToDrmFourCC(display, newConfigs[cfg]) !=
+                (uint32_t)nativeVisual) {
+                continue;
+            }
+
+            if (!configs) {
+                (*numConfig)++;
+                continue;
+            }
+
+            configs[(*numConfig)++] = newConfigs[cfg];
+        }
+    } else {
+        ret = data->egl.ChooseConfig(display->devDpy,
+                                     newAttribs,
+                                     configs,
+                                     configSize,
+                                     numConfig);
+    }
+
+done:
     free(newAttribs);
-    eGbmSetError(data, err);
+    free(newConfigs);
+    if (err != EGL_SUCCESS) eGbmSetError(data, err);
 
     eGbmUnrefObject(&display->base);
 
-    return EGL_FALSE;
+    return ret;
 }
 
 EGLBoolean
@@ -486,11 +612,22 @@ eGbmGetConfigAttribHook(EGLDisplay dpy,
                                              attribute,
                                              value);
 
-    if (ret && (attribute == EGL_SURFACE_TYPE)) {
-        if (*value & EGL_STREAM_BIT_KHR) {
-            *value |= EGL_WINDOW_BIT;
-        } else {
-            *value &= ~EGL_WINDOW_BIT;
+    if (ret) {
+        switch (attribute) {
+        case EGL_SURFACE_TYPE:
+            if (*value & EGL_STREAM_BIT_KHR) {
+                *value |= EGL_WINDOW_BIT;
+            } else {
+                *value &= ~EGL_WINDOW_BIT;
+            }
+            break;
+
+        case EGL_NATIVE_VISUAL_ID:
+            *value = ConfigToDrmFourCC(display, config);
+            break;
+
+        default:
+            break;
         }
     }
 
