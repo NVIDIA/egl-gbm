@@ -45,6 +45,7 @@ typedef struct GbmSurfaceRec {
     GbmObject base;
     EGLStreamKHR stream;
     EGLSurface egl;
+    EGLSyncKHR sync;
     GbmSurfaceImage images[MAX_STREAM_IMAGES];
     struct {
         GbmSurfaceImage *first;
@@ -158,22 +159,34 @@ RemoveSurfImage(GbmDisplay* display, GbmSurface* surf, EGLImage img)
 static bool AcquireSurfImage(GbmDisplay* display, GbmSurface* surf)
 {
     GbmPlatformData* data = display->data;
+    EGLDisplay dpy = display->devDpy;
     GbmSurfaceImage* image = NULL;
     EGLImage img;
     unsigned int i;
     EGLBoolean res;
 
-    /* XXX Pass in a reusable sync object and wait for it here? */
-    res = data->egl.StreamAcquireImageNV(display->devDpy,
+    res = data->egl.StreamAcquireImageNV(dpy,
                                          surf->stream,
                                          &img,
-                                         EGL_NO_SYNC_KHR);
+                                         surf->sync);
 
     if (!res) {
         /*
          * Match Mesa EGL dri2 platform behavior when no buffer is available
          * even though this function is not called from an EGL entry point
          */
+        eGbmSetError(data, EGL_BAD_SURFACE);
+        return false;
+    }
+
+    if (data->egl.ClientWaitSyncKHR(dpy, surf->sync, 0, EGL_FOREVER_KHR) !=
+        EGL_CONDITION_SATISFIED_KHR) {
+        /* Release the image back to the stream */
+        data->egl.StreamReleaseImageNV(dpy,
+                                       surf->stream,
+                                       img,
+                                       surf->sync);
+        /* Not clear what error to use. Pretend no buffer was available. */
         eGbmSetError(data, EGL_BAD_SURFACE);
         return false;
     }
@@ -384,6 +397,8 @@ FreeSurface(GbmObject* obj)
             data->egl.DestroySurface(dpy, surf->egl);
         if (surf->stream != EGL_NO_STREAM_KHR)
             data->egl.DestroyStreamKHR(dpy, surf->stream);
+        if (surf->sync != EGL_NO_SYNC_KHR)
+            data->egl.DestroySyncKHR(dpy, surf->sync);
 
         /* Drop reference to the display acquired at creation time */
         eGbmUnrefObject(&obj->dpy->base);
@@ -413,6 +428,10 @@ eGbmCreatePlatformWindowSurfaceHook(EGLDisplay dpy,
     };
     static const EGLint streamAttrs[] = {
         EGL_STREAM_FIFO_LENGTH_KHR, 2, /* One front, one back. */
+        EGL_NONE
+    };
+    static const EGLint syncAttrs[] = {
+        EGL_SYNC_STATUS_KHR, EGL_SIGNALED_KHR,
         EGL_NONE
     };
 
@@ -467,6 +486,12 @@ eGbmCreatePlatformWindowSurfaceHook(EGLDisplay dpy,
                                                          surfAttrs);
 
     if (!surf->egl) goto fail;
+
+    surf->sync = data->egl.CreateSyncKHR(dpy,
+                                         EGL_SYNC_REUSABLE_KHR,
+                                         syncAttrs);
+
+    if (!surf->sync) goto fail;
 
     if (!PumpSurfEvents(display, surf)) {
         err = EGL_BAD_ALLOC;
