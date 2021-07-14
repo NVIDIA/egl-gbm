@@ -34,16 +34,22 @@
 
 #define MAX_STREAM_IMAGES 10
 
+typedef struct GbmSurfaceImageRec {
+    EGLImage image;
+    struct gbm_bo* bo;
+    struct GbmSurfaceImageRec* nextFree;
+    bool locked;
+} GbmSurfaceImage;
+
 typedef struct GbmSurfaceRec {
     GbmObject base;
     EGLStreamKHR stream;
     EGLSurface egl;
+    GbmSurfaceImage images[MAX_STREAM_IMAGES];
     struct {
-        EGLImage image;
-        struct gbm_bo *bo;
-        bool locked;
-    } images[MAX_STREAM_IMAGES];
-    bool freeImages;
+        GbmSurfaceImage *first;
+        GbmSurfaceImage *last;
+    } freeImages;
 } GbmSurface;
 
 /*
@@ -100,19 +106,92 @@ static void
 RemoveSurfImage(GbmDisplay* display, GbmSurface* surf, EGLImage img)
 {
     GbmPlatformData* data = display->data;
-    int i;
+    GbmSurfaceImage* freeImg;
+    GbmSurfaceImage* prev = NULL;
+    unsigned int i;
 
     for (i = 0; i < ARRAY_LEN(surf->images); i++) {
         if (surf->images[i].image == img) {
+            /*
+             * The EGL_NV_stream_consumer_eglimage spec is unclear if removed
+             * images that are currently acquired still need to be released, but
+             * it does say this:
+             *
+             *   If an acquired EGLImage has not yet released when
+             *   eglDestroyImage is called, then, then an implicit
+             *   eglStreamReleaseImageNV will be called.
+             *
+             * so this should be sufficient either way.
+             */
             data->egl.DestroyImageKHR(display->devDpy, img);
             surf->images[i].image = EGL_NO_IMAGE_KHR;
             if (!surf->images[i].locked && surf->images[i].bo) {
                 gbm_bo_destroy(surf->images[i].bo);
                 surf->images[i].bo = NULL;
+            } else {
+                /*
+                 * If the image is currently acquired from the stream and
+                 * available for locking, remove it from the free images list.
+                 */
+                for (freeImg = surf->freeImages.first;
+                     freeImg;
+                     prev = freeImg, freeImg = freeImg->nextFree) {
+                    if (freeImg == &surf->images[i]) {
+                        if (prev)
+                            prev->nextFree = freeImg->nextFree;
+                        else
+                            surf->freeImages.first = freeImg->nextFree;
+
+                        if (surf->freeImages.last == freeImg)
+                            surf->freeImages.last = prev;
+
+                        break;
+                    }
+                }
             }
+
             break;
         }
     }
+}
+
+static bool AcquireSurfImage(GbmDisplay* display, GbmSurface* surf)
+{
+    GbmPlatformData* data = display->data;
+    GbmSurfaceImage* image = NULL;
+    EGLImage img;
+    unsigned int i;
+    EGLBoolean res;
+
+    /* XXX Pass in a reusable sync object and wait for it here? */
+    res = data->egl.StreamAcquireImageNV(display->devDpy,
+                                         surf->stream,
+                                         &img,
+                                         EGL_NO_SYNC_KHR);
+
+    if (!res) {
+        /*
+         * Match Mesa EGL dri2 platform behavior when no buffer is available
+         * even though this function is not called from an EGL entry point
+         */
+        eGbmSetError(data, EGL_BAD_SURFACE);
+        return false;
+    }
+
+    for (i = 0; i < ARRAY_LEN(surf->images); i++) {
+        if (surf->images[i].image == img) {
+            image = &surf->images[i];
+            break;
+        }
+    }
+
+    if (surf->freeImages.last)
+        surf->freeImages.last->nextFree = image;
+    else
+        surf->freeImages.first = image;
+    surf->freeImages.last = image;
+
+    return true;
 }
 
 static bool
@@ -121,25 +200,24 @@ PumpSurfEvents(GbmDisplay* display, GbmSurface* surf)
     GbmPlatformData* data = display->data;
     EGLenum event;
     EGLAttrib aux;
+    EGLint evStatus;
 
-    /*
-     * The image available event does not clear when queried, so it will
-     * always be received in the loop below if a frame is still available.
-     */
-    surf->freeImages = false;
-
-    do {
-        EGLint evStatus = data->egl.QueryStreamConsumerEventNV(display->devDpy,
-                                                               surf->stream,
-                                                               0,
-                                                               &event,
-                                                               &aux);
+    while (true) {
+        evStatus = data->egl.QueryStreamConsumerEventNV(display->devDpy,
+                                                        surf->stream,
+                                                        0,
+                                                        &event,
+                                                        &aux);
 
         if (evStatus != EGL_TRUE) break;
 
         switch (event) {
         case EGL_STREAM_IMAGE_AVAILABLE_NV:
-            surf->freeImages = true;
+            /*
+             * The image must be acquired to clear the IMAGE_AVAILABLE event,
+             * so acquire it here rather than in eGbmSurfaceLockFrontBuffer().
+             */
+            if (!AcquireSurfImage(display, surf)) return false;
             break;
         case EGL_STREAM_IMAGE_ADD_NV:
             if (!AddSurfImage(display, surf)) return false;
@@ -153,16 +231,9 @@ PumpSurfEvents(GbmDisplay* display, GbmSurface* surf)
             assert(!"Unhandled EGLImage stream consumer event");
 
         }
-    /*
-     * XXX Relies on knowledge of NV driver internals: As noted above, this
-     * event is not drained by querying it, so this loop will run forever if
-     * it waits for all available events to drain. Luckily, it also happens to
-     * be generated after any available EGL_STREAM_IMAGE_AVAILABLE_NV events
-     * by the driver, so it can be used as a sentinal for now.
-     */
-    } while (!surf->freeImages);
+    }
 
-    return true;
+    return evStatus != EGL_FALSE;
 }
 
 int
@@ -172,23 +243,20 @@ eGbmSurfaceHasFreeBuffers(struct gbm_surface* s)
 
     if (!surf) return 0;
 
-    if (surf->freeImages) return 1;
+    if (surf->freeImages.first) return 1;
 
     if (!PumpSurfEvents(surf->base.dpy, surf)) return 0;
 
-    return surf->freeImages;
+    return surf->freeImages.first != NULL ? 1 : 0;
 }
 
 struct gbm_bo*
 eGbmSurfaceLockFrontBuffer(struct gbm_surface* s)
 {
     GbmSurface* surf = GetSurf(s);
+    GbmSurfaceImage* image;
     GbmPlatformData* data;
     EGLDisplay dpy;
-    EGLImage img;
-    struct gbm_bo** bo = NULL;
-    unsigned int i;
-    EGLBoolean res;
 
     if (!surf) return NULL;
 
@@ -198,34 +266,12 @@ eGbmSurfaceLockFrontBuffer(struct gbm_surface* s)
     /* Must pump events to ensure images are created before acquiring them */
     if (!PumpSurfEvents(surf->base.dpy, surf)) return NULL;
 
-    /* XXX Pass in a reusable sync object and wait for it here? */
-    res = data->egl.StreamAcquireImageNV(dpy,
-                                         surf->stream,
-                                         &img,
-                                         EGL_NO_SYNC_KHR);
+    if (!surf->freeImages.first) return NULL;
 
-    if (!res) {
-        /*
-         * Match Mesa EGL dri2 platform behavior when no buffer is available
-         * even though this function is not called from an EGL entry point
-         */
-        eGbmSetError(data, EGL_BAD_SURFACE);
-        return NULL;
-    }
+    image = surf->freeImages.first;
+    assert(image->image);
 
-    surf->freeImages = false;
-
-    for (i = 0; i < ARRAY_LEN(surf->images); i++) {
-        if (surf->images[i].image == img) {
-            surf->images[i].locked = true;
-            bo = &surf->images[i].bo;
-            break;
-        }
-    }
-
-    assert(bo);
-
-    if (!*bo) {
+    if (!image->bo) {
         struct gbm_import_fd_modifier_data buf;
         uint64_t modifier;
         EGLint stride; /* XXX support planar formats */
@@ -235,15 +281,17 @@ eGbmSurfaceLockFrontBuffer(struct gbm_surface* s)
         int fd; /* XXX support planar separate memory objects */
 
         if (!data->egl.ExportDMABUFImageQueryMESA(dpy,
-                                                  img,
+                                                  image->image,
                                                   &format,
                                                   &planes,
                                                   &modifier)) goto fail;
 
         assert(planes == 1); /* XXX support planar formats */
 
-        if (!data->egl.ExportDMABUFImageMESA(dpy, img, &fd, &stride, &offset))
+        if (!data->egl.ExportDMABUFImageMESA(dpy, image->image,
+                                             &fd, &stride, &offset)) {
             goto fail;
+        }
 
         memset(&buf, 0, sizeof(buf));
         buf.width = s->v0.width;
@@ -254,20 +302,23 @@ eGbmSurfaceLockFrontBuffer(struct gbm_surface* s)
         buf.strides[0] = stride;
         buf.offsets[0] = offset;
         buf.modifier = modifier;
-        *bo = gbm_bo_import(surf->base.dpy->gbm,
-                            GBM_BO_IMPORT_FD_MODIFIER,
-                            &buf, 0);
+        image->bo = gbm_bo_import(surf->base.dpy->gbm,
+                                  GBM_BO_IMPORT_FD_MODIFIER,
+                                  &buf, 0);
 
-        if (!*bo) goto fail;
+        if (!image->bo) goto fail;
     }
 
-    return *bo;
+    surf->freeImages.first = image->nextFree;
+    if (!surf->freeImages.first)
+        surf->freeImages.last = NULL;
+    image->locked = true;
+
+    return image->bo;
 
 fail:
-    surf->images[i].locked = false;
     /* XXX Can this be called from outside an EGL entry point? */
     eGbmSetError(data, EGL_BAD_ALLOC);
-    data->egl.StreamReleaseImageNV(dpy, surf->stream, img, EGL_NO_SYNC_KHR);
 
     return NULL;
 
