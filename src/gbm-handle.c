@@ -115,7 +115,7 @@ eGbmUnrefObject(GbmObject* obj)
 }
 
 bool
-eGbmUnrefHandle(GbmHandle handle)
+eGbmDestroyHandle(GbmHandle handle)
 {
     GbmObject **res = NULL;
 
@@ -126,10 +126,12 @@ eGbmUnrefHandle(GbmHandle handle)
 
     res = tfind(handle, &handleTreeRoot, HandleCompar);
 
-    if (!res) {
+    if (!res || (*res)->destroyed) {
         eGbmHandlesUnlock();
         return false;
     }
+
+    (*res)->destroyed = true;
 
     /* UnrefObjectLocked releases the lock */
     UnrefObjectLocked(*res);

@@ -409,3 +409,18 @@ eGbmSurfaceUnwrap(GbmObject* obj)
 {
     return ((GbmSurface*)obj)->egl;
 }
+
+EGLBoolean
+eGbmDestroySurfaceHook(EGLDisplay dpy, EGLSurface eglSurf)
+{
+    GbmDisplay* display = (GbmDisplay*)eGbmRefHandle(dpy);
+    EGLBoolean ret = EGL_FALSE;
+
+    if (!display) return ret;
+
+    if (eGbmDestroyHandle(eglSurf)) ret = EGL_TRUE;
+
+    eGbmUnrefObject(&display->base);
+
+    return ret;
+}

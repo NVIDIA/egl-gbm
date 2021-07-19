@@ -31,6 +31,7 @@ typedef struct GbmObjectRec {
     struct GbmDisplayRec* dpy;
     EGLenum type;
     int refCount;
+    bool destroyed;
 } GbmObject;
 
 typedef const GbmObject* GbmHandle;
@@ -38,6 +39,6 @@ typedef const GbmObject* GbmHandle;
 GbmHandle eGbmAddObject(GbmObject* obj);
 GbmObject* eGbmRefHandle(GbmHandle handle);
 void eGbmUnrefObject(GbmObject* obj);
-bool eGbmUnrefHandle(GbmHandle handle);
+bool eGbmDestroyHandle(GbmHandle handle);
 
 #endif /* GBM_HANDLE_H */

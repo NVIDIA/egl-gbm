@@ -123,6 +123,7 @@ static const GbmEglHook EglHooksMap[] = {
     { "eglCreatePbufferSurface", CreatePbufferSurfaceHook },
     { "eglCreatePlatformPixmapSurface", CreatePlatformPixmapSurfaceHook },
     { "eglCreatePlatformWindowSurface", eGbmCreatePlatformWindowSurfaceHook },
+    { "eglDestroySurface", eGbmDestroySurfaceHook },
     { "eglInitialize", eGbmInitializeHook },
     { "eglTerminate", eGbmTerminateHook },
 };

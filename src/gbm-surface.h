@@ -36,5 +36,7 @@ EGLSurface eGbmCreatePlatformWindowSurfaceHook(EGLDisplay dpy,
                                                void* nativeWin,
                                                const EGLAttrib* attribs);
 void* eGbmSurfaceUnwrap(GbmObject* obj);
+EGLBoolean
+eGbmDestroySurfaceHook(EGLDisplay dpy, EGLSurface eglSurf);
 
 #endif /* GBM_SURFACE_H */
