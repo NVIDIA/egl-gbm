@@ -97,6 +97,7 @@ UnrefObjectLocked(GbmObject* obj)
 
         eGbmHandlesUnlock();
         obj->free(obj);
+        return;
     }
 
     eGbmHandlesUnlock();
