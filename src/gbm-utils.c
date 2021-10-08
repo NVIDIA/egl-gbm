@@ -117,6 +117,7 @@ eGbmPointerIsDereferenceable(void* p)
      * assume it can't be dereferenced.
      */
     if (p == NULL || !pMinCore) {
+        dlerror();
         return EGL_FALSE;
     }
 
