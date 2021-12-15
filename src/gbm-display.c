@@ -264,7 +264,7 @@ eGbmInitializeHook(EGLDisplay dpy, EGLint* major, EGLint* minor)
         !eGbmFindExtension("EGL_KHR_image_base", exts) ||
         !eGbmFindExtension("EGL_NV_stream_consumer_eglimage", exts) ||
         !eGbmFindExtension("EGL_MESA_image_dma_buf_export", exts) ||
-        !eGbmFindExtension("EGL_KHR_reusable_sync", exts)) {
+        !eGbmFindExtension("EGL_EXT_sync_reuse", exts)) {
         data->egl.Terminate(display->devDpy);
         eGbmSetError(data, EGL_NOT_INITIALIZED);
         res = EGL_FALSE;

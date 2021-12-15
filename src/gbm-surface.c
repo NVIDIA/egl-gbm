@@ -472,7 +472,7 @@ eGbmCreatePlatformWindowSurfaceHook(EGLDisplay dpy,
     if (!surf->egl) goto fail;
 
     surf->sync = data->egl.CreateSyncKHR(dpy,
-                                         EGL_SYNC_REUSABLE_KHR,
+                                         EGL_SYNC_FENCE_KHR,
                                          syncAttrs);
 
     if (!surf->sync) goto fail;
