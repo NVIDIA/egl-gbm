@@ -402,7 +402,7 @@ eGbmCreatePlatformWindowSurfaceHook(EGLDisplay dpy,
     struct gbm_surface* s = nativeWin;
     GbmSurface* surf = NULL;
     EGLint surfType;
-    EGLint err = EGL_SUCCESS;
+    EGLint err = EGL_BAD_ALLOC;
     EGLBoolean res;
     const EGLint surfAttrs[] = {
         /* XXX Merge in relevant <attribs> here as well */
@@ -454,13 +454,17 @@ eGbmCreatePlatformWindowSurfaceHook(EGLDisplay dpy,
     surf->base.free = FreeSurface;
     surf->stream = data->egl.CreateStreamKHR(dpy, streamAttrs);
 
-    if (!surf->stream) goto fail;
+    if (!surf->stream) {
+        err = EGL_BAD_ALLOC;
+        goto fail;
+    }
 
     if (!data->egl.StreamImageConsumerConnectNV(dpy,
                                                 surf->stream,
                                                 s->v0.count,
                                                 s->v0.modifiers,
                                                 NULL)) {
+        err = EGL_BAD_ALLOC;
         goto fail;
     }
 
@@ -469,13 +473,25 @@ eGbmCreatePlatformWindowSurfaceHook(EGLDisplay dpy,
                                                          surf->stream,
                                                          surfAttrs);
 
-    if (!surf->egl) goto fail;
+    if (!surf->egl) {
+        err = data->egl.GetError();
+        // Pass EGL_BAD_MATCH through, since that's an allowed error for
+        // eglCreateWindowSurface, and it would still make sense to the
+        // application. Otherwise, send back EGL_BAD_ALLOC.
+        if (err != EGL_BAD_MATCH) {
+            err = EGL_BAD_ALLOC;
+        }
+        goto fail;
+    }
 
     surf->sync = data->egl.CreateSyncKHR(dpy,
                                          EGL_SYNC_FENCE_KHR,
                                          syncAttrs);
 
-    if (!surf->sync) goto fail;
+    if (!surf->sync) {
+        err = EGL_BAD_ALLOC;
+        goto fail;
+    }
 
     if (!PumpSurfEvents(display, surf)) {
         err = EGL_BAD_ALLOC;
