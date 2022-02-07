@@ -434,6 +434,11 @@ eGbmCreatePlatformWindowSurfaceHook(EGLDisplay dpy,
         goto fail;
     }
 
+    if (s->gbm != display->gbm) {
+        err = EGL_BAD_NATIVE_WINDOW;
+        goto fail;
+    }
+
     res = data->egl.GetConfigAttrib(dpy, config, EGL_SURFACE_TYPE, &surfType);
 
     if (!res || !(surfType & EGL_STREAM_BIT_KHR)) {
