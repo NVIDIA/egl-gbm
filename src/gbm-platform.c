@@ -143,8 +143,7 @@ GetHookAddressExport(void *data, const char *name)
 static EGLBoolean
 UnloadPlatformExport(void *data)
 {
-    (void)data;
-
+    DestroyPlatformData(data);
     return EGL_TRUE;
 }
 
