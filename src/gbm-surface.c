@@ -18,10 +18,13 @@
 
 #define MAX_STREAM_IMAGES 10
 
+// One front, one back.
+#define WINDOW_STREAM_FIFO_LENGTH 2
+
 typedef struct GbmSurfaceImageRec {
     EGLImage image;
     struct gbm_bo* bo;
-    struct GbmSurfaceImageRec* nextFree;
+    struct GbmSurfaceImageRec* nextAcquired;
     bool locked;
 } GbmSurfaceImage;
 
@@ -34,7 +37,31 @@ typedef struct GbmSurfaceRec {
     struct {
         GbmSurfaceImage *first;
         GbmSurfaceImage *last;
-    } freeImages;
+    } acquiredImages;
+
+    /*
+     * The number of free color buffers. This is initially set to the stream's
+     * FIFO length, and updated whenever we acquire or release an EGLImage
+     * to/from the stream.
+     *
+     * FIXME: Our EGLImage handling is wrong: If the application calls
+     * eglSwapBuffers more than once without calling
+     * gbm_surface_lock_front_buffer, then gbm_surface_lock_front_buffer will
+     * return the buffer from the oldest swap, but it should return the newest
+     * swap.
+     *
+     * Also, if an application calls eglSwapBuffers more times than the FIFO
+     * depth without calling gbm_surface_lock_front_buffer, then it will fill
+     * up the FIFO and hang.
+     *
+     * To get something closer to correct behavior, in eglSwapBuffers we'd need
+     * to call eglStreamReleaseImageNV on all unlocked buffers, then call into
+     * the driver's eglSwapBuffers, and then call eglStreamAcquireImageNV to
+     * fetch the EGLImage for that frame. That would require adding an
+     * eglSwapBuffers hook and rewriting eGbmSurfaceLockFrontBuffer and
+     * eGbmSurfaceReleaseBuffer.
+     */
+    int numFreeImages;
 } GbmSurface;
 
 /*
@@ -91,7 +118,7 @@ static void
 RemoveSurfImage(GbmDisplay* display, GbmSurface* surf, EGLImage img)
 {
     GbmPlatformData* data = display->data;
-    GbmSurfaceImage* freeImg;
+    GbmSurfaceImage* acqImg;
     GbmSurfaceImage* prev = NULL;
     unsigned int i;
 
@@ -116,20 +143,22 @@ RemoveSurfImage(GbmDisplay* display, GbmSurface* surf, EGLImage img)
             } else {
                 /*
                  * If the image is currently acquired from the stream and
-                 * available for locking, remove it from the free images list.
+                 * available for locking, remove it from the acquired images list.
                  */
-                for (freeImg = surf->freeImages.first;
-                     freeImg;
-                     prev = freeImg, freeImg = freeImg->nextFree) {
-                    if (freeImg == &surf->images[i]) {
+                for (acqImg = surf->acquiredImages.first;
+                     acqImg;
+                     prev = acqImg, acqImg = acqImg->nextAcquired) {
+                    if (acqImg == &surf->images[i]) {
                         if (prev)
-                            prev->nextFree = freeImg->nextFree;
+                            prev->nextAcquired = acqImg->nextAcquired;
                         else
-                            surf->freeImages.first = freeImg->nextFree;
+                            surf->acquiredImages.first = acqImg->nextAcquired;
 
-                        if (surf->freeImages.last == freeImg)
-                            surf->freeImages.last = prev;
+                        if (surf->acquiredImages.last == acqImg)
+                            surf->acquiredImages.last = prev;
 
+                        assert(surf->numFreeImages < WINDOW_STREAM_FIFO_LENGTH);
+                        surf->numFreeImages++;
                         break;
                     }
                 }
@@ -182,11 +211,12 @@ static bool AcquireSurfImage(GbmDisplay* display, GbmSurface* surf)
         }
     }
 
-    if (surf->freeImages.last)
-        surf->freeImages.last->nextFree = image;
+    if (surf->acquiredImages.last)
+        surf->acquiredImages.last->nextAcquired = image;
     else
-        surf->freeImages.first = image;
-    surf->freeImages.last = image;
+        surf->acquiredImages.first = image;
+    surf->acquiredImages.last = image;
+    surf->numFreeImages--;
 
     return true;
 }
@@ -240,11 +270,9 @@ eGbmSurfaceHasFreeBuffers(struct gbm_surface* s)
 
     if (!surf) return 0;
 
-    if (surf->freeImages.first) return 1;
-
     if (!PumpSurfEvents(surf->base.dpy, surf)) return 0;
 
-    return surf->freeImages.first != NULL ? 1 : 0;
+    return (surf->numFreeImages > 0);
 }
 
 struct gbm_bo*
@@ -263,9 +291,9 @@ eGbmSurfaceLockFrontBuffer(struct gbm_surface* s)
     /* Must pump events to ensure images are created before acquiring them */
     if (!PumpSurfEvents(surf->base.dpy, surf)) return NULL;
 
-    if (!surf->freeImages.first) return NULL;
+    if (!surf->acquiredImages.first) return NULL;
 
-    image = surf->freeImages.first;
+    image = surf->acquiredImages.first;
     assert(image->image);
 
     if (!image->bo) {
@@ -306,9 +334,9 @@ eGbmSurfaceLockFrontBuffer(struct gbm_surface* s)
         if (!image->bo) goto fail;
     }
 
-    surf->freeImages.first = image->nextFree;
-    if (!surf->freeImages.first)
-        surf->freeImages.last = NULL;
+    surf->acquiredImages.first = image->nextAcquired;
+    if (!surf->acquiredImages.first)
+        surf->acquiredImages.last = NULL;
     image->locked = true;
 
     return image->bo;
@@ -357,6 +385,8 @@ eGbmSurfaceReleaseBuffer(struct gbm_surface* s, struct gbm_bo *bo)
                                                 surf->stream,
                                                 img,
                                                 EGL_NO_SYNC_KHR);
+        assert(surf->numFreeImages < WINDOW_STREAM_FIFO_LENGTH);
+        surf->numFreeImages++;
     }
 }
 
@@ -411,7 +441,7 @@ eGbmCreatePlatformWindowSurfaceHook(EGLDisplay dpy,
         EGL_NONE
     };
     static const EGLint streamAttrs[] = {
-        EGL_STREAM_FIFO_LENGTH_KHR, 2, /* One front, one back. */
+        EGL_STREAM_FIFO_LENGTH_KHR, WINDOW_STREAM_FIFO_LENGTH,
         EGL_NONE
     };
     static const EGLint syncAttrs[] = {
@@ -458,6 +488,7 @@ eGbmCreatePlatformWindowSurfaceHook(EGLDisplay dpy,
     surf->base.refCount = 1;
     surf->base.free = FreeSurface;
     surf->stream = data->egl.CreateStreamKHR(dpy, streamAttrs);
+    surf->numFreeImages = WINDOW_STREAM_FIFO_LENGTH;
 
     if (!surf->stream) {
         err = EGL_BAD_ALLOC;
