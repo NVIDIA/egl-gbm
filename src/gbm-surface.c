@@ -13,6 +13,7 @@
 #include <assert.h>
 #include <EGL/eglext.h>
 #include <gbmint.h>
+#include <unistd.h>
 
 #define ARRAY_LEN(a) (sizeof(a) / sizeof(a[0]))
 
@@ -282,6 +283,7 @@ eGbmSurfaceLockFrontBuffer(struct gbm_surface* s)
     GbmSurfaceImage* image;
     GbmPlatformData* data;
     EGLDisplay dpy;
+    uint32_t i;
 
     if (!surf) return NULL;
 
@@ -330,6 +332,10 @@ eGbmSurfaceLockFrontBuffer(struct gbm_surface* s)
         image->bo = gbm_bo_import(surf->base.dpy->gbm,
                                   GBM_BO_IMPORT_FD_MODIFIER,
                                   &buf, 0);
+
+        for (i = 0; i < buf.num_fds; i++) {
+            close(buf.fds[i]);
+        }
 
         if (!image->bo) goto fail;
     }
