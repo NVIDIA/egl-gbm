@@ -474,7 +474,7 @@ eGbmChooseConfigHook(EGLDisplay dpy,
      * EGL_NATIVE_VISUAL_ID attrib if present
      */
     nNewAttribs = (surfType ? nAttribs : nAttribs + 2);
-    nNewAttribs = (nativeVisualID ? nAttribs - 2 : nAttribs);
+    nNewAttribs = (nativeVisualID ? nNewAttribs - 2 : nNewAttribs);
 
     newAttribs = malloc((nNewAttribs + 1) * sizeof(*newAttribs));
 
