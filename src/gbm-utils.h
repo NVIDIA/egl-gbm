@@ -29,8 +29,6 @@ EGLBoolean eGbmFindExtension(const char* extension, const char* extensions);
 void eGbmSetErrorInternal(GbmPlatformData *data, EGLint error,
                           const char *file, int line);
 
-#if HAS_MINCORE
 EGLBoolean eGbmPointerIsDereferenceable(void* p);
-#endif
 
 #endif /* GBM_UTILS_H */

@@ -56,7 +56,7 @@ eGbmSetErrorInternal(GbmPlatformData *data, EGLint error,
     data->driver.setError(error, EGL_DEBUG_MSG_ERROR_KHR, msg);
 }
 
-#if HAS_MINCORE
+#if HAS_MINCORE && defined(RTLD_DEFAULT)
 EGLBoolean
 eGbmPointerIsDereferenceable(void* p)
 {
@@ -93,7 +93,7 @@ eGbmPointerIsDereferenceable(void* p)
          * mincore comes from libc, which the EGL driver depends on, so it
          * should always be loaded if our driver is running.
          */
-        pMinCore = (MINCOREPROC)dlsym(NULL, "mincore");
+        pMinCore = (MINCOREPROC)dlsym(RTLD_DEFAULT, "mincore");
     }
 
     /*
@@ -122,5 +122,15 @@ eGbmPointerIsDereferenceable(void* p)
      * can only succeed on dereferenceable memory ranges.
      */
     return (pMinCore((void*)addr, page_size, &unused) >= 0);
+}
+#else /* HAS_MINCORE */
+EGLBoolean
+eGbmPointerIsDereferenceable(void* p)
+{
+    /*
+     * We don't have mincore available, or we can't load it, so just assume
+     * that the pointer is not readable.
+     */
+    return EGL_FALSE;
 }
 #endif /* HAS_MINCORE */

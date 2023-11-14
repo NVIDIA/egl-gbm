@@ -327,7 +327,6 @@ eGbmIsValidNativeDisplayExport(void *data, void *nativeDpy)
     if (envPlatform && !strcasecmp(envPlatform, "gbm"))
         return EGL_TRUE;
 
-#if HAS_MINCORE
     /* GBM devices are pointers to instances of "struct gbm_device". */
     if (!eGbmPointerIsDereferenceable(nativeDpy))
         return EGL_FALSE;
@@ -337,17 +336,6 @@ eGbmIsValidNativeDisplayExport(void *data, void *nativeDpy)
      * function gbm_create_device() that is there precisely for this purpose:
      */
     return (*(void**)nativeDpy == gbm_create_device) ? EGL_TRUE : EGL_FALSE;
-#else
-    (void)nativeDpy;
-
-    /*
-     * No way to know, so assume it's not a GBM device given GBM isn't the
-     * most widely-used EGL platform in most environments. Users/applications
-     * will need to use the environment variable or eglGetPlatformDisplay()
-     * on platforms that don't have mincore().
-     */
-    return EGL_FALSE;
-#endif
 }
 
 void*

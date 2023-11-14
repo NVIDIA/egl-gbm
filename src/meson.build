@@ -7,6 +7,7 @@ endif
 add_project_arguments('-Wall', language : 'c')
 add_project_arguments('-Werror', language : 'c')
 add_project_arguments('-fvisibility=hidden', language : 'c')
+add_project_arguments('-D_GNU_SOURCE', language : 'c')
 
 if cc.has_argument('-Wpedantic')
     add_project_arguments('-Wno-pedantic', language : 'c')
