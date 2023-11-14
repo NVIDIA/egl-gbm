@@ -12,6 +12,8 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
+#include <gbm.h>
+
 /*
  * <GBM_EXTERNAL_VERSION_MAJOR>.<GBM_EXTERNAL_VERSION_MINOR>.
  * <GBM_EXTERNAL_VERSION_MICRO> defines the EGL external Wayland
@@ -63,6 +65,8 @@ typedef struct GbmPlatformDataRec {
     } driver;
 
     bool supportsDisplayReference;
+
+    const char * (* ptr_gbm_device_get_backend_name) (struct gbm_device *gbm);
 } GbmPlatformData;
 
 EGBM_EXPORT EGLBoolean loadEGLExternalPlatform(int major, int minor,

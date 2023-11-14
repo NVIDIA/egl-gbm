@@ -11,6 +11,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <dlfcn.h>
 
 static void
 DestroyPlatformData(GbmPlatformData* data)
@@ -25,6 +26,18 @@ CreatePlatformData(const EGLExtDriver *driver)
     GbmPlatformData *res = calloc(1, sizeof(*res));
 
     if (!res) return NULL;
+
+#if defined(RTLD_DEFAULT)
+    res->ptr_gbm_device_get_backend_name = dlsym(RTLD_DEFAULT, "gbm_device_get_backend_name");
+    if (res->ptr_gbm_device_get_backend_name == NULL) {
+        /*
+         * We're running with an old version of libgbm that doesn't support
+         * different backends.
+         */
+        DestroyPlatformData(res);
+        return NULL;
+    }
+#endif // defined(RTLD_DEFAULT)
 
 #define DO_EGL_FUNC(_PROTO, _FUNC) \
     res->egl._FUNC = (_PROTO)driver->getProcAddress("egl" #_FUNC);

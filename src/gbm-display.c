@@ -208,6 +208,17 @@ eGbmGetPlatformDisplayExport(void *dataVoid,
         if (!(display->gbm = gbm_create_device(display->fd))) goto fail;
     }
 
+    if (data->ptr_gbm_device_get_backend_name != NULL) {
+        const char *name = data->ptr_gbm_device_get_backend_name(display->gbm);
+        if (name == NULL || strcmp(name, "nvidia") != 0) {
+            /*
+             * This is not an NVIDIA device. Return failure, so that libglvnd can
+             * move on to the next driver.
+             */
+            goto fail;
+        }
+    }
+
     display->dev = FindGbmDevice(data, display->gbm);
 
     if (display->dev == EGL_NO_DEVICE_EXT) {
