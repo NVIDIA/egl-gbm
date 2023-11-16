@@ -41,7 +41,7 @@
   #define GBM_EXTERNAL_VERSION_MINOR                     1
  #endif
 #elif !defined(GBM_EXTERNAL_VERSION_MINOR)
- #define GBM_EXTERNAL_VERSION_MINOR                      0
+ #define GBM_EXTERNAL_VERSION_MINOR                      1
 #endif
 
 #define GBM_EXTERNAL_VERSION_MICRO                       0
