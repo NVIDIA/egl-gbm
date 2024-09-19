@@ -35,3 +35,6 @@ egl_gbm = library('nvidia-egl-gbm',
     version : meson.project_version(),
     install : true,
 )
+
+install_data('15_nvidia_gbm.json',
+  install_dir: '@0@/egl/egl_external_platform.d'.format(get_option('datadir')))
