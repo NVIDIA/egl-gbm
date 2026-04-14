@@ -516,6 +516,17 @@ eGbmChooseConfigHook(EGLDisplay dpy,
                 (attribs[nAttribs + 1] & ~EGL_WINDOW_BIT) |
                 EGL_STREAM_BIT_KHR;
 
+        /* Validate EGL_NATIVE_RENDERABLE boolean value */
+        } else if (attribs[nAttribs] == EGL_NATIVE_RENDERABLE) {
+            if (attribs[nAttribs + 1] != EGL_TRUE &&
+                attribs[nAttribs + 1] != EGL_FALSE &&
+                attribs[nAttribs + 1] != EGL_DONT_CARE) {
+                err = EGL_BAD_ATTRIBUTE;
+                goto done;
+            }
+            newAttribs[nNewAttribs++] = attribs[nAttribs];
+            newAttribs[nNewAttribs++] = attribs[nAttribs + 1];
+
         /* Remove all instances of the EGL_nATIVE_VISUAL_ID attribute */
         } else if (attribs[nAttribs] != EGL_NATIVE_VISUAL_ID) {
             newAttribs[nNewAttribs++] = attribs[nAttribs];
