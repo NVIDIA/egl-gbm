@@ -133,7 +133,7 @@ OpenDefaultDrmDevice(void)
     int numDevices = drmGetDevices2(0, devices, 1);
     int fd = -1;
 
-    if (numDevices == 0)
+    if (numDevices <= 0)
         return -1;
 
     if (devices[0]->nodes[DRM_NODE_RENDER])
