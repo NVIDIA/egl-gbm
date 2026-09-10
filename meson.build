@@ -1,5 +1,5 @@
 project('egl-gbm', 'c',
-        version : '1.1.3',
+        version : '1.1.5',
         default_options : [
           'buildtype=debugoptimized',
           'c_std=gnu99',
